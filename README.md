@@ -1,2 +1,2 @@
 # inflatable-lab
-Inflatable simulator for people with sensory needs
+Multi-platform webpage based inflatable simulator for people with sensory needs.
