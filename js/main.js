@@ -17,11 +17,36 @@ const wallMat = new THREE.MeshStandardMaterial({ color: MATS.vinyl?.color || '#e
 const bedMat = new THREE.MeshStandardMaterial({ color: 0x2f86d6, roughness: .5, side: THREE.DoubleSide });
 const N = 48, G = N + 1, CELL = 8 / N;
 const bed = new THREE.Mesh(new THREE.PlaneGeometry(8, 8, N, N).rotateX(-Math.PI / 2), bedMat); bed.frustumCulled = false; scene.add(bed);
-const side = new THREE.Mesh(new THREE.BoxGeometry(7.96, 1, 7.96).translate(0, .5, 0), bedMat); scene.add(side);
 const bp = bed.geometry.attributes.position, gi = new Int16Array(bp.count), gx = new Float32Array(bp.count), gz = new Float32Array(bp.count);
 for (let i = 0; i < bp.count; i++) { const ix = Math.round((bp.getX(i) + 4) / CELL), iz = Math.round((bp.getZ(i) + 4) / CELL); gi[i] = iz * G + ix; gx[i] = bp.getX(i); gz[i] = bp.getZ(i); }
 function ridge(z) { const u = ((z + 4) % 1 + 1) % 1; return Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2)); }
-{ const col = new Float32Array(bp.count * 3); for (let i = 0; i < bp.count; i++) { const r = .6 + .4 * ridge(gz[i]); col.set([r, r, r], i * 3); } bed.geometry.setAttribute("color", new THREE.BufferAttribute(col, 3)); bedMat.vertexColors = true; }
+// Eight tubes stacked with 20 cm overlap: the overlapping fabric becomes the baffle. Top and bottom skins mirror each other.
+const R_ = .5875, PITCH = .975, SEG = 28, CRc = 1.0, CO = 4 - (CRc + R_);
+const sheetMat = new THREE.MeshStandardMaterial({ color: 0x2a78c4, roughness: .55, side: THREE.DoubleSide });
+const innerMat = new THREE.MeshStandardMaterial({ color: 0x9fd0f5, roughness: .7, side: THREE.DoubleSide });
+const webMat = new THREE.MeshStandardMaterial({ color: 0x14405f, roughness: .8, side: THREE.DoubleSide });
+const mkSheet = (g, m) => { const o = new THREE.Mesh(g, m); o.frustumCulled = false; scene.add(o); return o; };
+const bedBot = mkSheet(new THREE.PlaneGeometry(8, 8, N, N).rotateX(-Math.PI / 2), sheetMat), bb = bedBot.geometry.attributes.position;
+// Plan outline: rounded corners. Vertices outside the outline slide onto it, where top and bottom skins meet at the tube's widest point.
+for (let i = 0; i < bp.count; i++) { let x = bp.getX(i), z = bp.getZ(i); const ax = Math.abs(x), az = Math.abs(z);
+  if (ax > CO && az > CO) { const dx = ax - CO, dz = az - CO, l = Math.hypot(dx, dz), r = CRc + R_;
+    if (l > r) { x = Math.sign(x) * (CO + dx * r / l); z = Math.sign(z) * (CO + dz * r / l); bp.setX(i, x); bp.setZ(i, z); bb.setX(i, x); bb.setZ(i, z); } } }
+const SEAMS = [0, 1, 2, 3, 4, 5, 6].map(k => -2.925 + k * PITCH);
+// Thin sheets with airflow slots, kept clear of the end tubes so air can pass round their ends.
+function holeyGeo() { const g = new THREE.PlaneGeometry(5.6, 1, SEG, 3), idx = g.index.array, keep = [];
+  for (let q = 0; q < SEG * 3; q++) { if ((q / SEG | 0) === 1) { const ix = q % SEG; if (ix >= 2 && ix < SEG - 2 && (ix - 2) % 6 < 3) continue; } for (let k = 0; k < 6; k++) keep.push(idx[q * 6 + k]); } g.setIndex(keep); return g; }
+const baffles = SEAMS.map(z => { const m = mkSheet(holeyGeo(), innerMat); m.position.z = z; return { z, m }; });
+// Cyan line in the sketch: not a baffle, but a stitched seam where the front/back tube skin is sewn to the adjacent middle tubes.
+const seamLines = [-2.925, 2.925].map(x => { const m = mkSheet(new THREE.PlaneGeometry(.08, 5.85, 1, SEG).rotateX(-Math.PI / 2), webMat); m.position.x = x; return { x, m }; });
+const webs = SEAMS.map(z => { const m = mkSheet(new THREE.PlaneGeometry(5.85, .08, SEG, 1).rotateX(-Math.PI / 2), webMat); m.position.z = z; return { z, m }; });
+const ramp = mkSheet(new THREE.PlaneGeometry(2.4, 7, 8, 1).rotateX(-Math.PI / 2), sheetMat); ramp.position.x = -5.2;
+function updateInner() {
+  const set = (p, i, x, z) => { const t = topH(x, z, 1) + wSample(x, z), bt = botH(x, z); for (let r = 0; r < 4; r++) p.setY(r * (SEG + 1) + i, t + (bt - t) * r / 3); };
+  for (const b of baffles) { const p = b.m.geometry.attributes.position; for (let i = 0; i <= SEG; i++) set(p, i, p.getX(i), b.z); p.needsUpdate = true; }
+  for (const c of seamLines) { const p = c.m.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, topH(c.x, p.getZ(i), 1) + wSample(c.x, p.getZ(i)) + .012); p.needsUpdate = true; }
+  for (const wb of webs) { const p = wb.m.geometry.attributes.position; for (let i = 0; i < p.count; i++) p.setY(i, topH(p.getX(i), wb.z, 1) + wSample(p.getX(i), wb.z) + .012); p.needsUpdate = true; }
+  const rp = ramp.geometry.attributes.position; for (let i = 0; i < rp.count; i++) rp.setY(i, rampH(rp.getX(i) - 5.2)); rp.needsUpdate = true;
+}
 // Fabric does not stretch: each wall/pillar is a stack of fixed-size tubes that flatten, widen and slump (pile) as air is lost.
 const tubes = [];
 function addTube(kind, i, x, z, nx, nz, len) {
@@ -29,8 +54,8 @@ function addTube(kind, i, x, z, nx, nz, len) {
   if (kind === 'x') g.rotateZ(Math.PI / 2); if (kind === 'z') g.rotateX(Math.PI / 2);
   const m = new THREE.Mesh(g, wallMat); scene.add(m); tubes.push({ m, kind, i, x, z, nx, nz, th: .15 + i * .17, f: 1 });
 }
-for (let i = 0; i < 3; i++) { addTube('x', i, 0, -3.75, 0, 1, 7); addTube('x', i, 0, 3.75, 0, -1, 7); addTube('z', i, 3.75, 0, -1, 0, 7);
-  for (const [x, z] of [[-3.8, -3.8], [-3.8, 3.8], [3.8, -3.8], [3.8, 3.8]]) addTube('p', i, x, z, -Math.sign(x) * .7, -Math.sign(z) * .7, 0); }
+for (let i = 0; i < 3; i++) { addTube('x', i, 0, -3.45, 0, 1, 4.8); addTube('x', i, 0, 3.45, 0, -1, 4.8); addTube('z', i, 3.45, 0, -1, 0, 4.8);
+  for (const [x, z] of [[-3, -3], [-3, 3], [3, -3], [3, 3]]) addTube('p', i, x, z, -Math.sign(x) * .7, -Math.sign(z) * .7, 0); }
 
 // ---- simulation state (reduced-order: one air chamber + membrane wave grid + player spring)
 const TARGET = 3400, SHUT = 4500, Q0 = 400; // Pa gauge target, fan shut-off pressure, fan rate Pa/s
@@ -43,10 +68,16 @@ let contact = false; reset();
 function setMat(k) { mat = MATS[k]; wallMat.color.set(mat.color); } setMat(Object.keys(MATS)[0]);
 const wSample = (x, z) => { const fx = clamp((x + 4) / CELL, 0, N - .001), fz = clamp((z + 4) / CELL, 0, N - .001), ix = fx | 0, iz = fz | 0, tx = fx - ix, tz = fz - iz;
   return w[iz * G + ix] * (1 - tx) * (1 - tz) + w[iz * G + ix + 1] * tx * (1 - tz) + w[(iz + 1) * G + ix] * (1 - tx) * tz + w[(iz + 1) * G + ix + 1] * tx * tz; };
-const baseH = () => .12 + .55 * S.bedF, entry = x => sstep(-4.5, -3.8, x);
-// Inflated: round lanes between stitch lines. Deflated: loose fabric wrinkles.
-const bedTop = (x, z, k) => entry(x) * (baseH() + S.bedF * .3 * ridge(z) * k + (1 - S.bedF) * .08 * Math.sin(x * 3.1 + z * 2.3) * Math.sin(z * 4.3 - x * 1.7));
-const surface = (x, z) => bedTop(x, z, .5) + (Math.abs(x) < 4 && Math.abs(z) < 4 ? wSample(x, z) : 0);
+const fp = () => .05 + .95 * S.bedF; // fabric is fixed length: deflating flattens the tubes, it does not shrink them
+function laneS(z) { const k = clamp(Math.round((z + 4 - R_) / PITCH), 0, 7), dz = z - (-4 + R_ + k * PITCH); return Math.sqrt(Math.max(0, R_ * R_ - dz * dz)); }
+function ringS(x, z) { const qx = Math.abs(x) - (3.4125 - CRc), qz = Math.abs(z) - (3.4125 - CRc);
+  const d = Math.abs(Math.hypot(Math.max(qx, 0), Math.max(qz, 0)) + Math.min(Math.max(qx, qz), 0) - CRc); return Math.sqrt(Math.max(0, R_ * R_ - d * d)); }
+// Outer ring (side tubes 1 and 8 + front and back tubes) is one tube bent round rounded corners; the six middle tubes sit inside it.
+function tubeS(x, z) { const ax = Math.abs(x); if (Math.abs(z) >= 2.925) return ringS(x, z); const wR = sstep(2.925, 3.4, ax); return laneS(z) * (1 - wR) + ringS(x, z) * wR; }
+const topH = (x, z, k) => fp() * (R_ + k * tubeS(x, z)) + (1 - S.bedF) * .08 * Math.sin(x * 3.1 + z * 2.3) * Math.sin(z * 4.3 - x * 1.7);
+const botH = (x, z) => Math.max(.02, fp() * (R_ - tubeS(x, z)) + Math.min(0, wSample(x, z)) * .5);
+const rampH = x => sstep(-6.4, -4, x) * fp() * R_, baseH = () => fp() * (R_ + laneS(3.45));
+const surface = (x, z) => x < -4 ? rampH(x) : topH(x, z, .6) + wSample(x, z);
 const audio = new SensoryAudio(), keys = new Set(); let jx = 0, jy = 0, jumpQ = 0;
 
 function step(dt) {
@@ -68,6 +99,7 @@ function step(dt) {
   const l = Math.hypot(fw, rt) || 1, sp = 3.2 * Math.min(1, Math.hypot(fw, rt));
   pl.x += (-Math.sin(pl.yaw) * fw + Math.cos(pl.yaw) * rt) / l * sp * dt; pl.z += (-Math.cos(pl.yaw) * fw - Math.sin(pl.yaw) * rt) / l * sp * dt;
   pl.x = clamp(pl.x, -9, 3.45); pl.z = clamp(pl.z, -3.5, 3.5);
+  { const ax = Math.abs(pl.x), az = Math.abs(pl.z); if (pl.x > -4 && ax > CO && az > CO) { const dx = ax - CO, dz = az - CO, l = Math.hypot(dx, dz); if (l > 1.3) { pl.x = Math.sign(pl.x) * (CO + dx * 1.3 / l); pl.z = Math.sign(pl.z) * (CO + dz * 1.3 / l); } } }
   const h = surface(pl.x, pl.z), d = h - pl.y, kk = 40 + 700 * Math.pow(Math.min(pf, 1), 1.3);
   if (d > 0) {
     if (!contact) { const v = Math.max(0, -pl.vy); contact = true; if (v > .8 && h > .2) landing(v, pf); }
@@ -84,8 +116,8 @@ function landing(v, pf) {
 
 // ---- render
 function render() {
-  for (let i = 0; i < bp.count; i++) bp.setY(i, bedTop(gx[i], gz[i], 1) + w[gi[i]]);
-  bp.needsUpdate = true; bed.geometry.computeVertexNormals(); const base = baseH(); side.scale.y = base + .02;
+  for (let i = 0; i < bp.count; i++) { const x = gx[i], z = gz[i], wi = w[gi[i]]; bp.setY(i, topH(x, z, 1) + wi); bb.setY(i, botH(x, z)); }
+  bp.needsUpdate = true; bb.needsUpdate = true; bed.geometry.computeVertexNormals(); bedBot.geometry.computeVertexNormals(); const base = baseH(); updateInner();
   const ys = {};
   for (const t of tubes) { const k = t.kind + t.x + t.z, y0 = ys[k] === undefined ? base : ys[k], hh = .8 * (.3 + .7 * t.f); ys[k] = y0 + hh;
     const lat = 1 + .7 * (1 - t.f), lean = (1 - t.f) * (.5 + .15 * t.i) + S.wob * .08 * (t.i + 1), sy = hh / .8;
@@ -114,7 +146,8 @@ $('jump').addEventListener('pointerdown', e => { e.preventDefault(); jumpQ = .25
 $('go').onclick = () => { audio.start(); $('start').style.display = 'none'; };
 $('blower').onclick = () => { S.on = !S.on; $('blower').textContent = 'Blower: ' + (S.on ? 'ON' : 'OFF'); };
 $('vent').onclick = () => { S.vent = !S.vent; $('vent').textContent = 'Vent: ' + (S.vent ? 'OPEN' : 'CLOSED'); };
-$('mat').onchange = e => setMat(e.target.value); $('reset').onclick = reset; $('gear').onclick = () => $('panel').classList.toggle('open');
+$('mat').onchange = e => setMat(e.target.value); $('xray').onclick = () => { const on = !bedMat.transparent; bedMat.transparent = on; bedMat.opacity = on ? .25 : 1; bedMat.depthWrite = !on; bedMat.needsUpdate = true; $('xray').textContent = 'X-ray: ' + (on ? 'ON' : 'OFF'); };
+$('reset').onclick = reset; $('gear').onclick = () => $('panel').classList.toggle('open');
 $('inten').oninput = e => { audio.intensity = +e.target.value; audio.apply(); };
 $('calm').onchange = e => { audio.calm = e.target.checked; audio.apply(); };
 $('hap').onchange = e => { audio.haptics = e.target.checked; };
