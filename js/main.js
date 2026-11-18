@@ -15,28 +15,38 @@ scene.add(new THREE.HemisphereLight(0xffffff, 0x6f8f6a, 2.2)); const sun = new T
 const ground = new THREE.Mesh(new THREE.PlaneGeometry(300, 300), new THREE.MeshLambertMaterial({ color: 0x5c9a55 })); ground.rotation.x = -Math.PI / 2; scene.add(ground);
 const wallMat = new THREE.MeshStandardMaterial({ color: MATS.vinyl?.color || '#e8478b', roughness: .55 });
 const bedMat = new THREE.MeshStandardMaterial({ color: 0x2f86d6, roughness: .5, side: THREE.DoubleSide });
-const N = 24, G = N + 1, CELL = 8 / N;
+const N = 48, G = N + 1, CELL = 8 / N;
 const bed = new THREE.Mesh(new THREE.PlaneGeometry(8, 8, N, N).rotateX(-Math.PI / 2), bedMat); bed.frustumCulled = false; scene.add(bed);
 const side = new THREE.Mesh(new THREE.BoxGeometry(7.96, 1, 7.96).translate(0, .5, 0), bedMat); scene.add(side);
-const bp = bed.geometry.attributes.position, gi = new Int16Array(bp.count), gx = new Float32Array(bp.count);
-for (let i = 0; i < bp.count; i++) { const ix = Math.round((bp.getX(i) + 4) / CELL), iz = Math.round((bp.getZ(i) + 4) / CELL); gi[i] = iz * G + ix; gx[i] = bp.getX(i); }
-const mkWall = (w, d, x, z) => { const m = new THREE.Mesh(new THREE.BoxGeometry(w, 2.4, d).translate(0, 1.2, 0), wallMat); m.position.set(x, 0, z); scene.add(m); return m; };
-const wN = mkWall(8, .5, 0, -3.75), wS = mkWall(8, .5, 0, 3.75), wE = mkWall(.5, 8, 3.75, 0);
-const pillars = [[-3.8, -3.8], [-3.8, 3.8], [3.8, -3.8], [3.8, 3.8]].map(([x, z]) => { const m = new THREE.Mesh(new THREE.CylinderGeometry(.45, .5, 3, 24).translate(0, 1.5, 0), wallMat); m.position.set(x, 0, z); scene.add(m); return m; });
+const bp = bed.geometry.attributes.position, gi = new Int16Array(bp.count), gx = new Float32Array(bp.count), gz = new Float32Array(bp.count);
+for (let i = 0; i < bp.count; i++) { const ix = Math.round((bp.getX(i) + 4) / CELL), iz = Math.round((bp.getZ(i) + 4) / CELL); gi[i] = iz * G + ix; gx[i] = bp.getX(i); gz[i] = bp.getZ(i); }
+function ridge(z) { const u = ((z + 4) % 1 + 1) % 1; return Math.sqrt(Math.max(0, 1 - (2 * u - 1) ** 2)); }
+{ const col = new Float32Array(bp.count * 3); for (let i = 0; i < bp.count; i++) { const r = .6 + .4 * ridge(gz[i]); col.set([r, r, r], i * 3); } bed.geometry.setAttribute("color", new THREE.BufferAttribute(col, 3)); bedMat.vertexColors = true; }
+// Fabric does not stretch: each wall/pillar is a stack of fixed-size tubes that flatten, widen and slump (pile) as air is lost.
+const tubes = [];
+function addTube(kind, i, x, z, nx, nz, len) {
+  const g = kind === 'p' ? new THREE.CylinderGeometry(.5, .5, .8, 24) : new THREE.CylinderGeometry(.4, .4, len, 20);
+  if (kind === 'x') g.rotateZ(Math.PI / 2); if (kind === 'z') g.rotateX(Math.PI / 2);
+  const m = new THREE.Mesh(g, wallMat); scene.add(m); tubes.push({ m, kind, i, x, z, nx, nz, th: .15 + i * .17, f: 1 });
+}
+for (let i = 0; i < 3; i++) { addTube('x', i, 0, -3.75, 0, 1, 7); addTube('x', i, 0, 3.75, 0, -1, 7); addTube('z', i, 3.75, 0, -1, 0, 7);
+  for (const [x, z] of [[-3.8, -3.8], [-3.8, 3.8], [3.8, -3.8], [3.8, 3.8]]) addTube('p', i, x, z, -Math.sign(x) * .7, -Math.sign(z) * .7, 0); }
 
 // ---- simulation state (reduced-order: one air chamber + membrane wave grid + player spring)
 const TARGET = 3400, SHUT = 4500, Q0 = 400; // Pa gauge target, fan shut-off pressure, fan rate Pa/s
 const S = {}; let mat = MATS[Object.keys(MATS)[0]];
 const w = new Float32Array(G * G), wv = new Float32Array(G * G);
 const P0 = { x: -7, z: 0, y: 0, vy: 0, yaw: -Math.PI / 2, pitch: 0 }; const pl = { ...P0 };
-function reset() { Object.assign(S, { P: TARGET, bump: 0, on: true, vent: false, spin: 1, bedF: 1, wallF: 1, wob: 0, wobV: 0, leak: 0, dP: 0 }); Object.assign(pl, P0); w.fill(0); wv.fill(0); contact = false;
+function reset() { Object.assign(S, { P: TARGET, bump: 0, on: true, vent: false, spin: 1, bedF: 1, wallF: 1, wob: 0, wobV: 0, leak: 0, dP: 0 }); Object.assign(pl, P0); w.fill(0); wv.fill(0); contact = false; for (const t of tubes) t.f = 1;
   $('blower').textContent = 'Blower: ON'; $('vent').textContent = 'Vent: CLOSED'; }
 let contact = false; reset();
 function setMat(k) { mat = MATS[k]; wallMat.color.set(mat.color); } setMat(Object.keys(MATS)[0]);
 const wSample = (x, z) => { const fx = clamp((x + 4) / CELL, 0, N - .001), fz = clamp((z + 4) / CELL, 0, N - .001), ix = fx | 0, iz = fz | 0, tx = fx - ix, tz = fz - iz;
   return w[iz * G + ix] * (1 - tx) * (1 - tz) + w[iz * G + ix + 1] * tx * (1 - tz) + w[(iz + 1) * G + ix] * (1 - tx) * tz + w[(iz + 1) * G + ix + 1] * tx * tz; };
-const bedH = () => .12 + .8 * S.bedF, wallH = () => 2.4 * (.05 + .95 * S.wallF), entry = x => sstep(-4.5, -3.8, x);
-function surface(x, z) { return bedH() * entry(x) + (Math.abs(x) < 4 && Math.abs(z) < 4 ? wSample(x, z) : 0); }
+const baseH = () => .12 + .55 * S.bedF, entry = x => sstep(-4.5, -3.8, x);
+// Inflated: round lanes between stitch lines. Deflated: loose fabric wrinkles.
+const bedTop = (x, z, k) => entry(x) * (baseH() + S.bedF * .3 * ridge(z) * k + (1 - S.bedF) * .08 * Math.sin(x * 3.1 + z * 2.3) * Math.sin(z * 4.3 - x * 1.7));
+const surface = (x, z) => bedTop(x, z, .5) + (Math.abs(x) < 4 && Math.abs(z) < 4 ? wSample(x, z) : 0);
 const audio = new SensoryAudio(), keys = new Set(); let jx = 0, jy = 0, jumpQ = 0;
 
 function step(dt) {
@@ -47,10 +57,10 @@ function step(dt) {
   S.bump *= Math.exp(-dt * 4);
   const pf = clamp((S.P + S.bump) / TARGET, 0, 1.3); S.pf = pf;
   S.bedF += (Math.pow(Math.min(pf, 1.05), .6) - S.bedF) * (1 - Math.exp(-dt * 3));
-  S.wallF += (sstep(.2, .85, pf) - S.wallF) * (1 - Math.exp(-dt * 1.2));
+  for (const t of tubes) { const tg = sstep(t.th, t.th + .35, pf); t.f += (tg - t.f) * (1 - Math.exp(-dt * (tg > t.f ? 1.2 : 2.2))); }
   S.wobV += (-30 * S.wob - 2.5 * S.wobV) * dt; S.wob += S.wobV * dt;
   // membrane waves
-  for (let z = 1; z < N; z++) for (let x = 1; x < N; x++) { const i = z * G + x; wv[i] += (55 * (w[i - 1] + w[i + 1] + w[i - G] + w[i + G] - 4 * w[i]) - 7 * w[i] - 2.4 * wv[i]) * dt; }
+  for (let z = 1; z < N; z++) for (let x = 1; x < N; x++) { const i = z * G + x; wv[i] += (220 * (w[i - 1] + w[i + 1] + w[i - G] + w[i + G] - 4 * w[i]) - 7 * w[i] - 2.4 * wv[i]) * dt; }
   for (let z = 1; z < N; z++) for (let x = 1; x < N; x++) { const i = z * G + x; w[i] = clamp(w[i] + wv[i] * dt, -.5, .4); }
   // player
   const fw = -jy + (keys.has('KeyW') || keys.has('ArrowUp') ? 1 : 0) - (keys.has('KeyS') || keys.has('ArrowDown') ? 1 : 0);
@@ -74,12 +84,13 @@ function landing(v, pf) {
 
 // ---- render
 function render() {
-  const bh = bedH(), wh = wallH(), lean = Math.pow(1 - S.wallF, 1.5) * .9 + S.wob * .08;
-  for (let i = 0; i < bp.count; i++) bp.setY(i, bh * entry(gx[i]) + w[gi[i]]);
-  bp.needsUpdate = true; bed.geometry.computeVertexNormals(); side.scale.y = Math.max(.01, bh);
-  const sc = wh / 2.4; for (const m of [wN, wS, wE]) { m.position.y = bh; m.scale.y = sc; }
-  wN.rotation.x = lean; wS.rotation.x = -lean; wE.rotation.z = lean;
-  for (const p of pillars) { p.position.y = bh; p.scale.y = .05 + .95 * S.wallF; }
+  for (let i = 0; i < bp.count; i++) bp.setY(i, bedTop(gx[i], gz[i], 1) + w[gi[i]]);
+  bp.needsUpdate = true; bed.geometry.computeVertexNormals(); const base = baseH(); side.scale.y = base + .02;
+  const ys = {};
+  for (const t of tubes) { const k = t.kind + t.x + t.z, y0 = ys[k] === undefined ? base : ys[k], hh = .8 * (.3 + .7 * t.f); ys[k] = y0 + hh;
+    const lat = 1 + .7 * (1 - t.f), lean = (1 - t.f) * (.5 + .15 * t.i) + S.wob * .08 * (t.i + 1), sy = hh / .8;
+    t.m.position.set(t.x + t.nx * lean, y0 + hh / 2, t.z + t.nz * lean);
+    if (t.kind === 'x') t.m.scale.set(1, sy, lat); else if (t.kind === 'z') t.m.scale.set(lat, sy, 1); else t.m.scale.set(lat, sy, lat); }
   camera.position.set(pl.x, pl.y + 1.6, pl.z); camera.rotation.set(pl.pitch, pl.yaw, 0);
   $('read').innerHTML = `Pressure ${((S.P + S.bump) / 1000).toFixed(2)} kPa · ${Math.round(S.pf * 100)}%<br>${S.dP > 5 ? 'Inflating' : S.dP < -5 ? 'Losing air' : 'Holding'} · ${mat.name}`;
   renderer.render(scene, camera);
@@ -96,6 +107,7 @@ cv.addEventListener('pointermove', e => { if (joy && e.pointerId === joy.id) { j
   else { const p = ptr.get(e.pointerId); if (p) { pl.yaw -= (e.clientX - p.x) * .005; pl.pitch = clamp(pl.pitch - (e.clientY - p.y) * .005, -1.4, 1.4); p.x = e.clientX; p.y = e.clientY; } } });
 const up = e => { if (joy && e.pointerId === joy.id) { joy = null; jx = jy = 0; } ptr.delete(e.pointerId); };
 cv.addEventListener('pointerup', up); cv.addEventListener('pointercancel', up);
+addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('keydown', e => { if (e.target.matches('input,select')) return; keys.add(e.code); if (e.code === 'Space') { jumpQ = .25; e.preventDefault(); } });
 addEventListener('keyup', e => keys.delete(e.code)); addEventListener('blur', () => keys.clear());
 $('jump').addEventListener('pointerdown', e => { e.preventDefault(); jumpQ = .25; });
