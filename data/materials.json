@@ -1,0 +1,5 @@
+{
+ "vinyl": {"name": "PVC vinyl", "c": 0.5, "lin": 0.02, "color": "#e8478b"},
+ "nylon": {"name": "Coated nylon", "c": 0.35, "lin": 0.012, "color": "#3d8be8"},
+ "mesh":  {"name": "Mesh panels", "c": 2.0, "lin": 0.03, "color": "#f2b630"}
+}

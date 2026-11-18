@@ -1,0 +1,31 @@
+<!doctype html><html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
+<meta name="theme-color" content="#16303f"><title>Inflatable Lab 3 · Castle</title>
+<script type="importmap">{"imports":{"three":"https://cdn.jsdelivr.net/npm/three@0.170.0/build/three.module.min.js"}}</script>
+<style>
+html,body{margin:0;height:100%;overflow:hidden;background:#9fd0ea;font:14px system-ui,sans-serif;color:#fff;touch-action:none;overscroll-behavior:none}
+canvas{display:block;width:100%;height:100%;touch-action:none}
+#ui{position:fixed;inset:0;pointer-events:none}
+#ui button,#ui select,#panel,#start{pointer-events:auto}
+button,select{font:600 14px system-ui;color:#fff;background:#16303fe6;border:1px solid #ffffff55;border-radius:10px;padding:10px 13px;min-height:44px}
+button:active{background:#3b7a9c}
+#top{position:absolute;top:max(10px,env(safe-area-inset-top));left:10px;right:10px;display:flex;gap:7px;flex-wrap:wrap;justify-content:flex-end}
+#read{position:absolute;top:max(10px,env(safe-area-inset-top));left:10px;background:#16303fcc;border-radius:10px;padding:8px 11px;line-height:1.4;max-width:42vw}
+#jump{position:absolute;right:16px;bottom:max(18px,env(safe-area-inset-bottom));width:96px;height:96px;border-radius:50%}
+#panel{position:absolute;top:max(64px,calc(env(safe-area-inset-top) + 54px));right:10px;width:min(290px,calc(100vw - 20px));background:#16303ff2;border-radius:12px;padding:14px;display:none}
+#panel.open{display:block}#panel label{display:flex;gap:9px;align-items:center;margin:12px 0}#panel input[type=range]{flex:1}
+#start{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;background:#0f2431e6;text-align:center;padding:24px}
+#start h1{margin:0;font-size:28px}#start p{max-width:420px;line-height:1.5;margin:0}
+</style></head><body>
+<div id="ui">
+ <div id="read"></div>
+ <div id="top"><button id="blower">Blower: ON</button><button id="vent">Vent: CLOSED</button><select id="mat" aria-label="Material"></select><button id="gear">Sensory</button><button id="reset">Reset</button></div>
+ <div id="panel"><b>Sensory settings</b>
+  <label>Intensity <input id="inten" type="range" min="0" max="1" step=".05" value=".8"></label>
+  <label><input id="calm" type="checkbox"> Calm mode (softer, muffled sound)</label>
+  <label><input id="hap" type="checkbox" checked> Vibration (Android)</label>
+  <small>Move: WASD or left thumb · Look: drag · Jump: Space or button</small></div>
+ <button id="jump">JUMP</button>
+ <div id="start"><h1>Inflatable Lab 3</h1><p>Bounce on the castle. Switch the blower off, open the vent, or change the material and feel it sag.</p><button id="go">Tap to start</button></div>
+</div>
+<script type="module" src="js/main.js"></script></body></html>
